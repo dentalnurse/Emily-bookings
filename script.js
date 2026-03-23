@@ -25,9 +25,10 @@ let state = {
   
   config: {
     name: '', email: '', title: 'Book a Consultation', meetingLink: '',
-    adminPin: '1234',
+    adminPin: '123456789',
     meetingTypes: [
-      { name: '1-to-1 Tutorial', duration: 15 },
+      { name: 'Introduction Call', duration: 15 },
+      { name: '1-to-1', duration: 45},
       { name: 'Professional Discussion', duration: 45 }
     ],
     emailjsPublicKey: '', emailjsServiceId: '', emailjsTemplateId: '',
