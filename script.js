@@ -80,7 +80,6 @@ async function submitRequest() {
 // =============================================================================
 // 3. INTERFACE (Rendering)
 // =============================================================================
-
 function render() {
   const app = document.getElementById('app');
   if (!state.isLoaded) { app.innerHTML = `<div class="loading">Loading...</div>`; return; }
