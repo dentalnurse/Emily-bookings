@@ -290,7 +290,12 @@ function renderAdminView() {
       <div class="section-title">Add Availability</div>
       <div class="grid-2">
         <div><label class="field-label">Date</label><input type="date" oninput="state.newSlot.date=this.value"></div>
-        <div><label class="field-label">Length</label><select onchange="state.newSlot.slotLength=this.value"><option value="30">30 min</option><option value="45" selected>45 min</option></select></div>
+        <div><label class="field-label">Length</label>
+          <select onchange="state.newSlot.slotLength=this.value">
+            <option value="15">15 min</option>
+            <option value="45"selected>45 min</option>
+          </select>
+        </div>
       </div>
       <div class="grid-2" style="margin-top:10px">
         <div><label class="field-label">Starts</label><input type="time" oninput="state.newSlot.start=this.value"></div>
@@ -299,26 +304,61 @@ function renderAdminView() {
       <button class="btn btn-primary btn-full" style="margin-top:15px" onclick="generateSlots()">+ Generate Slots</button>
       <hr class="divider">
       ${Object.keys(grouped).sort().map(date => `
-        <div style="margin-top:15px">
-          <div style="font-weight:700; display:flex; justify-content:space-between;">${formatDate(date)} <button class="btn btn-ghost" onclick="state.slots.filter(s=>s.date==='${date}').forEach(s=>deleteSlot(s.id))">Remove Day</button></div>
-          <div class="chips-wrap">${grouped[date].map(s => `<div class="chip">${formatTime(s.start)} <span onclick="deleteSlot('${s.id}')" style="color:red; cursor:pointer;">×</span></div>`).join('')}</div>
-        </div>`).join('')}
+        <div style="margin-top:20px;">
+          <div style="font-weight:700; display:flex; justify-content:space-between;">
+            ${formatDate(date)} 
+            <button class="btn btn-ghost" style="font-size:11px;" onclick="if(confirm('Remove day?')) state.slots.filter(s=>s.date==='${date}').forEach(s=>deleteSlot(s.id))">
+              Remove Day
+            </button>
+          </div>
+          <div class="chips-wrap" style="margin-top:10px;">
+            ${grouped[date].sort((a,b)=>a.start.localeCompare(b.start)).map(s => {
+              // Calculate the end time based on the default 45 min or a specific duration
+              const endTime = calculateEndTime(s.start, 45); 
+              return `
+                <div class="chip" style="display:flex; align-items:center; gap:8px;">
+                  ${formatTime(s.start)} – ${formatTime(endTime)}
+                  <span style="cursor:pointer; color:red;" onclick="deleteSlot('${s.id}')">×</span>
+                </div>`;
+            }).join('')}
+    </div>
+  </div>`).join('')}
     </div>`;
   } else {
-    sub = `<div class="card">${state.requests.length === 0 ? '<p>No requests.</p>' : state.requests.map(req => `
-      <div class="request-card" style="border:1px solid #eee; padding:15px; border-radius:12px; margin-bottom:10px; position:relative;">
-        <div style="font-weight:bold;">${esc(req.name)} <span style="font-size:11px; color:#888;">(${req.status.toUpperCase()})</span></div>
-        <div style="font-size:13px; color:#555;">${req.type} | ${formatDate(req.slotDate)} at ${formatTime(req.slotStart)}</div>
-        <div style="margin-top:12px; display:flex; gap:10px;">
-          ${req.status === 'pending' ? `
-            <button class="btn btn-primary" onclick="updateRequestStatus('${req.id}','approved')">Approve</button>
-            <button class="btn btn-ghost" onclick="updateRequestStatus('${req.id}','denied')">Deny</button>
-          ` : `
-            ${req.status === 'approved' ? `<button class="btn btn-ghost" style="color:orange;" onclick="handleCancel('${req.id}')">Cancel</button>` : ''}
-            <button class="btn btn-ghost" style="color:red;" onclick="deleteRequest('${req.id}')">Delete Record</button>
-          `}
-        </div>
-      </div>`).join('')}</div>`;
+    sub = state.requests.length === 0 ? `<p>No requests yet.</p>` : state.requests.map(req => `
+  <div class="request-card" style="border:1px solid #eee; padding:15px; border-radius:12px; margin-bottom:12px; background: white; position:relative;">
+    <div style="position:absolute; top:15px; right:15px; background:#fff3e0; color:#ef6c00; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:700;">
+      ⏳ ${req.status.toUpperCase()}
+    </div>
+    
+    <div style="font-weight:bold; font-size:16px;">${escapeHtml(req.name)}</div>
+    <div style="color: #666; font-size: 14px; margin-bottom:10px;">${escapeHtml(req.email)}</div>
+    
+    <div style="font-size: 13px; color: #444; line-height: 1.6;">
+      <strong>Type:</strong> ${escapeHtml(req.type)} | 
+      <strong>Date:</strong> ${formatDate(req.slotDate)} | 
+      <strong>Time:</strong> ${formatTime(req.slotStart)}
+    </div>
+
+    ${state.config.teamsLink ? `
+      <div style="margin-top: 8px; font-size: 12px;">
+        <strong>Teams Link:</strong> 
+        <a href="${state.config.teamsLink}" target="_blank" style="color: #0078d4; text-decoration: none; word-break: break-all;">
+          ${state.config.teamsLink}
+        </a>
+      </div>
+    ` : ''}
+
+    <div style="margin-top:15px; display:flex; gap:10px;">
+      ${req.status === 'pending' ? `
+        <button class="btn btn-primary" onclick="updateRequestStatus('${req.id}','approved')">Approve</button>
+        <button class="btn btn-ghost" onclick="updateRequestStatus('${req.id}','denied')">Deny</button>
+      ` : `
+        ${req.status === 'approved' ? `<button class="btn btn-ghost" style="color:orange;" onclick="handleCancel('${req.id}')">Cancel</button>` : ''}
+        <button class="btn btn-ghost" onclick="deleteRequest('${req.id}')">Delete</button>
+      `}
+    </div>
+  </div>`).join('');
   }
 
   return `
