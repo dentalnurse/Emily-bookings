@@ -1,7 +1,7 @@
 /**
- * EMILY'S BOOKING SYSTEM - VERSION 5.9
- * Fix: Restored "Cancel" button for Approved requests.
- * Fix: Persistent Student Inputs.
+ * EMILY'S BOOKING SYSTEM - VERSION 6.1
+ * Includes: Meeting Type Manager UI, Persistent Inputs, 
+ * and Enhanced Admin Request Cards with Teams Links.
  */
 
 const firebaseConfig = {
@@ -30,7 +30,7 @@ let state = {
   },
   slots: [],
   requests: [],
-  studentForm: { name: '', email: '', type: '', duration: 0, slotId: '' },
+  studentForm: { name: '', email: '', type: '', duration: 0, slotId: '', message: '' },
   hasSubmitted: false,
   newSlot: { date: '', start: '', end: '', slotLength: '45' },
   tempPin: '' 
@@ -41,7 +41,8 @@ let state = {
 // =============================================================================
 
 async function sendEmailNotification(requestData, status, reason = "") {
-  const { name, email, type, slotDate, slotStart, duration } = requestData;
+  // 1. Ensure 'message' is extracted here
+  const { name, email, type, slotDate, slotStart, duration, message } = requestData;
   const teamsLink = state.config.teamsLink || "Link to follow";
   const formattedDate = formatDate(slotDate);
   const endTimeStr = calculateEndTime(slotStart, duration || 45);
@@ -52,19 +53,22 @@ async function sendEmailNotification(requestData, status, reason = "") {
   let targetName = name;   
   let statusMessage = "";
   
+  // 2. Format the student note safely
+  const studentNote = (message && message.trim()) ? `\n\nStudent Message: ${message}` : "";
 
   if (status === 'approved') {
-    statusMessage = `Your booking for a ${type} at ${formattedTime} on ${formattedDate}.\nPlease join here: ${teamsLink}`;
+    statusMessage = `Hi ${name},\nYour booking for a ${type} at ${formattedTime} on ${formattedDate} is confirmed.\nPlease join here: ${teamsLink}\nLooking forward to speaking with you.\nBest regards,\nEmily Bremner`;
   } else if (status === 'denied') {
-    statusMessage = `Your booking request for ${type} on ${formattedDate} has been declined.`;
+    statusMessage = `Hi ${name},\nYour booking request for ${type} on ${formattedDate} has been declined.\nBest regards,\nEmily Bremner`;
   } else if (status === 'cancelled') {
-    statusMessage = `Your appointment for ${type} on ${formattedDate} has been cancelled. Reason: ${reason}`;
+    statusMessage = `Hi ${name},\nApologies, I have had to cancel your ${type} on ${formattedDate}.\nReason: ${reason}.\nPlease feel free to rearrange.\nBest regards,\nEmily Bremner`;
   } else if (status === 'admin_alert') {
     targetEmail = state.config.email;
     targetName = state.config.name;
-    statusMessage = `NEW REQUEST RECEIVED:\n\nFrom: ${name} (${email})\nType: ${type}\nWhen: ${formattedDate} @ ${formattedTime}`;
-  }
+    statusMessage = `NEW REQUEST RECEIVED:\n\nFrom: ${name} (${email})\nType: ${type}\nWhen: ${formattedDate} at ${formattedTime}${studentNote}`;
+  } // Removed the stray semicolon here
 
+  // 3. DEFINE templateParams (This was missing in your shared snippet!)
   const templateParams = {
     to_name: targetName,
     to_email: targetEmail,
@@ -79,10 +83,17 @@ async function sendEmailNotification(requestData, status, reason = "") {
 
   try {
     if (!state.config.emailjsServiceId || !state.config.emailjsPublicKey) return;
-    await emailjs.send(state.config.emailjsServiceId, state.config.emailjsTemplateId, templateParams, state.config.emailjsPublicKey);
-  } catch (error) { console.error("Email failed:", error); }
+    await emailjs.send(
+      state.config.emailjsServiceId, 
+      state.config.emailjsTemplateId, 
+      templateParams, 
+      state.config.emailjsPublicKey
+    );
+    console.log("Email sent successfully!");
+  } catch (error) { 
+    console.error("Email failed:", error); 
+  }
 }
-
 // =============================================================================
 // 3. DATABASE & LOGIC
 // =============================================================================
@@ -125,40 +136,60 @@ async function updatePin() {
 async function updateRequestStatus(requestId, newStatus) {
   const reqRef = db.collection('requests').doc(requestId);
   const doc = await reqRef.get();
+  
   if (doc.exists) {
+    // 1. Update Database
     await reqRef.update({ status: newStatus });
-    await sendEmailNotification(doc.data(), newStatus);
-    showFlash(`Request ${newStatus}`);
     loadApplicationData(); 
-  }
-}
+
+    // 3. Send email in the background (don't make the user wait for 'await')
+    sendEmailNotification(doc.data(), newStatus).catch(err => console.error("Email failed:", err));
+  }}
 
 async function submitRequest() {
   const form = state.studentForm;
   const slot = state.slots.find(s => s.id === form.slotId);
-  const newRequest = { ...form, slotDate: slot.date, slotStart: slot.start, status: 'pending', submittedAt: new Date().toISOString() };
+  const newRequest = { 
+    ...form, 
+    slotDate: slot.date, 
+    slotStart: slot.start, 
+    status: 'pending', 
+    submittedAt: new Date().toISOString() 
+  };
+  
+  // 1. Save to Database
   await db.collection('requests').add(newRequest);
-  if (state.config.email) await sendEmailNotification(newRequest, 'admin_alert');
+  
+  // 2. TRIGGER THE EMAIL TO YOU
+  // We don't use 'await' here so the student's screen 
+  // updates immediately while the email sends in the background
+  sendEmailNotification(newRequest, 'admin_alert').catch(err => console.error("Admin alert failed:", err));
+
   state.hasSubmitted = true;
-  render();
+  loadApplicationData();
 }
 
 async function handleCancel(requestId) {
   const reason = prompt("Enter reason for cancellation:");
   if (reason === null) return; 
+
   const reqRef = db.collection('requests').doc(requestId);
   const doc = await reqRef.get();
+  
   if (doc.exists) {
-    await sendEmailNotification(doc.data(), 'cancelled', reason);
+    // 1. Update Database
     await reqRef.update({ status: 'cancelled' });
-    showFlash("Cancelled and student notified");
     loadApplicationData();
+    // 3. Background email
+    sendEmailNotification(doc.data(), 'cancelled', reason).catch(err => console.error("Email failed:", err));
   }
 }
 
 async function deleteRequest(requestId) {
   if (!confirm("Delete record?")) return;
+  // Perform delete
   await db.collection('requests').doc(requestId).delete();
+  // Refresh data
   loadApplicationData();
 }
 
@@ -182,6 +213,66 @@ async function generateSlots() {
 async function deleteSlot(id) {
   await db.collection('slots').doc(id).delete();
   loadApplicationData();
+}
+
+async function addMeetingType() {
+    const name = prompt("Enter meeting name (e.g. Revision Session):");
+    const duration = prompt("Enter duration in minutes (e.g. 45):");
+    if (name && duration) {
+        if (!state.config.meetingTypes) state.config.meetingTypes = [];
+        state.config.meetingTypes.push({ name: name, duration: parseInt(duration) });
+        await db.collection('settings').doc('config').set(state.config);
+        showFlash("Meeting Type Added");
+        render();
+    }
+}
+
+async function deleteMeetingType(index) {
+    if (confirm("Remove this meeting type?")) {
+        state.config.meetingTypes.splice(index, 1);
+        await db.collection('settings').doc('config').set(state.config);
+        showFlash("Meeting Type Removed");
+        render();
+    }
+}
+
+async function editSlotTime(slotId, currentStart) {
+  const newTime = prompt("Enter new start time (HH:MM):", currentStart);
+  if (newTime && newTime !== currentStart) {
+    // Basic validation to ensure HH:MM format
+    if (/^\d{2}:\d{2}$/.test(newTime)) {
+      await db.collection('slots').doc(slotId).update({ start: newTime });
+      showFlash("Time Updated");
+      loadApplicationData();
+    } else {
+      showFlash("Invalid format. Use HH:MM");
+    }
+  }
+}
+
+async function editMeetingType(index) {
+    // 1. Identify which meeting type we are editing
+    const type = state.config.meetingTypes[index];
+    
+    // 2. Prompt for a new name and a new duration
+    const newName = prompt("Edit Meeting Name:", type.name);
+    const newDuration = prompt("Edit Duration (in minutes):", type.duration);
+    
+    // 3. Check if the user hit 'Cancel' or left it blank
+    if (newName !== null && newDuration !== null) {
+        // Update the local state first
+        state.config.meetingTypes[index] = { 
+            name: newName, 
+            duration: parseInt(newDuration) 
+        };
+        
+        // 4. Save the updated list back to Firestore
+        await db.collection('settings').doc('config').set(state.config);
+        
+        // 5. Notify the user and refresh the screen
+        showFlash("Meeting Type Updated");
+        render(); 
+    }
 }
 
 // =============================================================================
@@ -224,10 +315,21 @@ function renderStudentView() {
     .sort((a,b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
     .forEach(s => { if(!groupedSlots[s.date]) groupedSlots[s.date] = []; groupedSlots[s.date].push(s); });
 
-  return `<div class="card">
+  // Validation Check for the button
+  const isFormValid = f.name.trim().length > 0 && f.email.trim().length > 0 && f.type && f.slotId;
+
+return `<div class="card">
     <div class="grid-2">
-      <input type="text" placeholder="Name" value="${escapeHtml(f.name)}" oninput="state.studentForm.name=this.value">
-      <input type="email" placeholder="Email" value="${escapeHtml(f.email)}" oninput="state.studentForm.email=this.value">
+      <div>
+        <label class="field-label">Name *</label>
+        <input type="text" placeholder="Full Name" value="${f.name}" 
+          oninput="state.studentForm.name=this.value; document.getElementById('book-btn').disabled = !(state.studentForm.name.trim() && state.studentForm.email.trim() && state.studentForm.type && state.studentForm.slotId)">
+      </div>
+      <div>
+        <label class="field-label">Email *</label>
+        <input type="email" placeholder="Email Address" value="${f.email}" 
+          oninput="state.studentForm.email=this.value; document.getElementById('book-btn').disabled = !(state.studentForm.name.trim() && state.studentForm.email.trim() && state.studentForm.type && state.studentForm.slotId)">
+      </div>
     </div>
     <div class="section-title">Meeting Type</div>
     <div class="chips-wrap">${(state.config.meetingTypes || []).map(opt => `
@@ -239,7 +341,24 @@ function renderStudentView() {
             const end = calculateEndTime(slot.start, f.duration);
             return `<button class="chip ${f.slotId === slot.id ? 'selected' : ''}" onclick="state.studentForm.slotId='${slot.id}'; render();">${formatTime(slot.start)} – ${formatTime(end)}</button>`;
         }).join('')}</div></div>`).join('') : '<p style="color:gray; margin-top:20px;">Please select a meeting type.</p>'}
-    <button class="btn btn-primary btn-full" style="margin-top:20px" ${(f.name && f.email && f.type && f.slotId) ? '' : 'disabled'} onclick="submitRequest()">Submit Request</button>
+<div style="margin-top:20px;">
+      <label class="field-label">Additional Message (Optional)</label>
+      <textarea 
+        placeholder="Anything else I should know before the meeting?" 
+        style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-family: inherit; resize: vertical;" 
+        rows="3"
+        oninput="state.studentForm.message=this.value"
+      >${f.message || ''}</textarea>
+    </div>
+
+    <button 
+      class="btn btn-primary btn-full" 
+      style="margin-top:20px" 
+      ${(f.name.trim() && f.email.trim() && f.type && f.slotId) ? '' : 'disabled'} 
+      onclick="submitRequest()"
+    >
+      Book Now
+    </button>
   </div>`;
 }
 
@@ -257,17 +376,28 @@ function renderAdminView() {
           <div><label class="field-label">Your Name</label><input type="text" placeholder="Dr. Smith" value="${esc(c.name)}" oninput="silentSave('config.name',this.value)"></div>
           <div><label class="field-label">Your Email</label><input type="email" placeholder="you@university.ac.uk" value="${esc(c.email)}" oninput="silentSave('config.email',this.value)"></div>
         </div>
-        <div class="grid-2">
-          <div><label class="field-label">Email Provider</label><select onchange="silentSave('config.emailProvider',this.value)">
-            <option value="zoho" ${c.emailProvider==='zoho'?'selected':''}>Zoho Mail</option>
-            <option value="gmail" ${c.emailProvider==='gmail'?'selected':''}>Gmail</option>
-            <option value="outlook" ${c.emailProvider==='outlook'?'selected':''}>Outlook</option>
-            <option value="mailto" ${c.emailProvider==='mailto'?'selected':''}>Other</option></select></div>
-          <div><label class="field-label">Page Title</label><input type="text" value="${esc(c.title)}" oninput="silentSave('config.title',this.value)"></div>
-        </div>
         <hr class="divider">
         <div class="section-title">Teams Link</div>
         <div class="personal-teams"><label class="field-label">Personal Teams Link</label><input type="text" value="${esc(c.teamsLink||'')}" oninput="silentSave('config.teamsLink',this.value)"></div>
+        
+        <hr class="divider">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div class="section-title" style="margin:0;">Meeting Types</div>
+          <button class="btn btn-primary" style="padding: 5px 12px; font-size:12px;" onclick="addMeetingType()">+ Add New</button>
+        </div>
+        <div style="background: #f9f9f9; padding: 10px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #eee;">
+          ${(c.meetingTypes || []).length === 0 ? '<p style="font-size:13px; color:#888; text-align:center;">No types added.</p>' : 
+            c.meetingTypes.map((type, index) => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:white; padding:10px; border-radius:6px; margin-bottom:8px; border:1px solid #eee;">
+              <div><span style="font-weight:700;">${esc(type.name)}</span> <span style="font-size:12px; color:#666;">(${type.duration}m)</span></div>
+              <div style="display:flex; gap:10px;">
+                <button class="btn btn-ghost" style="color:blue; border:none; padding:0;" onclick="editMeetingType(${index})">Edit</button>
+                <button class="btn btn-ghost" style="color:red; border:none; padding:0;" onclick="deleteMeetingType(${index})">Delete</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
         <hr class="divider">
         <div class="section-title">Auto-Email (EmailJS)</div>
         <div style="margin-bottom:16px"><label class="field-label">Public Key</label><input type="text" value="${esc(c.emailjsPublicKey||'')}" oninput="silentSave('config.emailjsPublicKey',this.value)"></div>
@@ -293,7 +423,7 @@ function renderAdminView() {
         <div><label class="field-label">Length</label>
           <select onchange="state.newSlot.slotLength=this.value">
             <option value="15">15 min</option>
-            <option value="45"selected>45 min</option>
+            <option value="45" selected>45 min</option>
           </select>
         </div>
       </div>
@@ -312,17 +442,13 @@ function renderAdminView() {
             </button>
           </div>
           <div class="chips-wrap" style="margin-top:10px;">
-            ${grouped[date].sort((a,b)=>a.start.localeCompare(b.start)).map(s => {
-              // Calculate the end time based on the default 45 min or a specific duration
-              const endTime = calculateEndTime(s.start, 45); 
-              return `
+            ${grouped[date].sort((a,b)=>a.start.localeCompare(b.start)).map(s => `
                 <div class="chip" style="display:flex; align-items:center; gap:8px;">
-                  ${formatTime(s.start)} – ${formatTime(endTime)}
+                  ${formatTime(s.start)} – ${formatTime(calculateEndTime(s.start, 45))}
                   <span style="cursor:pointer; color:red;" onclick="deleteSlot('${s.id}')">×</span>
-                </div>`;
-            }).join('')}
-    </div>
-  </div>`).join('')}
+                </div>`).join('')}
+          </div>
+        </div>`).join('')}
     </div>`;
   } else {
     sub = state.requests.length === 0 ? `<p>No requests yet.</p>` : state.requests.map(req => `
@@ -331,11 +457,11 @@ function renderAdminView() {
       ⏳ ${req.status.toUpperCase()}
     </div>
     
-    <div style="font-weight:bold; font-size:16px;">${escapeHtml(req.name)}</div>
-    <div style="color: #666; font-size: 14px; margin-bottom:10px;">${escapeHtml(req.email)}</div>
+    <div style="font-weight:bold; font-size:16px;">${esc(req.name)}</div>
+    <div style="color: #666; font-size: 14px; margin-bottom:10px;">${esc(req.email)}</div>
     
     <div style="font-size: 13px; color: #444; line-height: 1.6;">
-      <strong>Type:</strong> ${escapeHtml(req.type)} | 
+      <strong>Type:</strong> ${esc(req.type)} | 
       <strong>Date:</strong> ${formatDate(req.slotDate)} | 
       <strong>Time:</strong> ${formatTime(req.slotStart)}
     </div>
