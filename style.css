@@ -18,6 +18,8 @@
 --red-soft: rgba(192,57,43,0.08);
 --amber: #D4880F;
 --amber-soft: rgba(212,136,15,0.1);
+--purple: #6B4FA0;
+--purple-soft: rgba(107,79,160,0.1);
 --radius: 14px;
 --radius-sm: 10px;
 --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
@@ -128,6 +130,7 @@ cursor: pointer; transition: all 0.2s;
 .btn-ghost { background: var(--accent-soft); color: var(--accent); }
 .btn-success { background: var(--green-soft); color: var(--green); }
 .btn-danger { background: var(--red-soft); color: var(--red); }
+.btn-purple { background: var(--purple-soft); color: var(--purple); }
 .btn-full { width: 100%; justify-content: center; padding: 14px; font-size: 16px; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -146,6 +149,7 @@ font-weight: 500; cursor: pointer; transition: all 0.2s;
 .badge-amber { background: var(--amber-soft); color: var(--amber); }
 .badge-green { background: var(--green-soft); color: var(--green); }
 .badge-red { background: var(--red-soft); color: var(--red); }
+.badge-purple { background: var(--purple-soft); color: var(--purple); }
 
 .request-card { background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); padding: 20px; margin-bottom: 12px; }
 .request-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
@@ -158,6 +162,13 @@ font-weight: 500; cursor: pointer; transition: all 0.2s;
 .notice { background: var(--accent-soft); border-radius: var(--radius); padding: 14px 18px; font-size: 13px; color: var(--accent); line-height: 1.6; margin-top: 20px; }
 .notice a { color: var(--accent); }
 .notice-warn { background: var(--red-soft); color: var(--red); }
+.notice-purple { background: var(--purple-soft); color: var(--purple); border-radius: var(--radius); padding: 14px 18px; font-size: 13px; line-height: 1.6; margin: 16px 0; }
+.notice-purple a { color: var(--purple); font-weight: 600; }
+.payment-notice { background: var(--purple-soft); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; color: var(--purple); margin-bottom: 12px; }
+.payment-notice a { color: var(--purple); font-weight: 600; }
+.price-tag { font-size: 12px; background: var(--purple-soft); color: var(--purple); border-radius: 6px; padding: 2px 7px; font-weight: 700; margin-left: 6px; }
+.chip.paid-chip { border-color: var(--purple); }
+.chip.paid-chip.selected { background: var(--purple-soft); color: var(--purple); border-color: var(--purple); }
 
 .empty { text-align: center; padding: 48px 24px; color: var(--text-soft); }
 .empty .icon { font-size: 36px; margin-bottom: 8px; }
