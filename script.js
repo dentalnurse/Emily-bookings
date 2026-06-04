@@ -241,7 +241,7 @@ async function sendEmailNotification(requestData, status, reason = "") {
       state.config.emailjsServiceId,
       state.config.emailjsTemplateId,
       templateParams,
-      state.config.emailjsPublicKey
+      { publicKey: state.config.emailjsPublicKey }
     );
     console.log("Email sent successfully!");
   } catch (error) {
