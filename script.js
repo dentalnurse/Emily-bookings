@@ -273,10 +273,11 @@ async function loadApplicationData() {
   } catch (error) { state.isLoaded = true; render(); }
 }
 
-// Silently remove slots with dates before today from Firestore
+// Silently remove expired slots from Firestore.
+// Before 6pm: removes past dates only. After 6pm: also removes tomorrow's slots.
 async function cleanupPastSlots() {
-  const today = getTodayDateString();
-  const past = state.slots.filter(s => s.date < today);
+  const cutoff = getCutoffDate();
+  const past = state.slots.filter(s => s.date <= cutoff);
   if (past.length === 0) return;
   try {
     const batch = db.batch();
@@ -336,6 +337,11 @@ async function submitRequest() {
   };
 
   await db.collection('requests').add(newRequest);
+
+  // Remove the booked slot so it can't be double-booked
+  await db.collection('slots').doc(form.slotId).delete();
+  state.slots = state.slots.filter(s => s.id !== form.slotId);
+
   sendEmailNotification(newRequest, 'admin_alert').catch(err => console.error("Admin alert failed:", err));
 
   state.hasSubmitted = true;
@@ -499,7 +505,7 @@ function renderStudentView() {
   const groupedSlots = {};
 
   state.slots
-    .filter(s => s.date >= getTodayDateString() && !unavailableIds.includes(s.id))
+    .filter(s => s.date > getCutoffDate() && !unavailableIds.includes(s.id))
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
     .forEach(s => { if (!groupedSlots[s.date]) groupedSlots[s.date] = []; groupedSlots[s.date].push(s); });
 
@@ -761,6 +767,15 @@ function formatDate(d) { return new Date(d + 'T00:00:00').toLocaleDateString('en
 function formatDateLong(d) { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
 function formatTime(t) { if (!t) return ""; const [h, m] = t.split(':'); const hr = parseInt(h); return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`; }
 function getTodayDateString() { return new Date().toISOString().split('T')[0]; }
+
+// Before 6pm: cutoff = yesterday, so today's slots stay visible.
+// After 6pm: cutoff = tomorrow, so tomorrow's slots are also removed (18h booking cutoff).
+function getCutoffDate() {
+  const now = new Date();
+  const d = new Date(now);
+  d.setDate(d.getDate() + (now.getHours() >= 18 ? 1 : -1));
+  return d.toISOString().split('T')[0];
+}
 function escapeHtml(s) { if (!s) return ""; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function showFlash(m) { state.flashMessage = m; render(); setTimeout(() => { state.flashMessage = null; render(); }, 3000); }
 
