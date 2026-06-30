@@ -34,6 +34,7 @@ let state = {
   requests: [],
   studentForm: { name: '', email: '', type: '', duration: 0, price: 0, slotId: '', message: '' },
   hasSubmitted: false,
+  isSubmitting: false,
   newSlot: { date: '', start: '', end: '', slotLength: '45' },
   tempPin: ''
 };
@@ -236,17 +237,26 @@ async function sendEmailNotification(requestData, status, reason = "") {
   };
 
   try {
-    if (!state.config.emailjsServiceId || !state.config.emailjsPublicKey) return;
+    if (!state.config.emailjsServiceId || !state.config.emailjsPublicKey) return false;
     await emailjs.send(
       state.config.emailjsServiceId,
       state.config.emailjsTemplateId,
       templateParams,
       state.config.emailjsPublicKey
     );
-    console.log("Email sent successfully!");
+    return true;
   } catch (error) {
     console.error("Email failed:", error);
+    return false;
   }
+}
+
+// Opens Zoho compose as a fallback when EmailJS fails or isn't configured
+function openComposeFallback(to, subject, body) {
+  const u = 'https://mail.zoho.com/zm/#/compose?to=' + encodeURIComponent(to)
+    + '&subject=' + encodeURIComponent(subject)
+    + '&body=' + encodeURIComponent(body);
+  window.open(u, '_blank');
 }
 
 // =============================================================================
@@ -311,21 +321,54 @@ async function updatePin() {
 async function updateRequestStatus(requestId, newStatus) {
   const reqRef = db.collection('requests').doc(requestId);
   const doc = await reqRef.get();
+  if (!doc.exists) return;
 
-  if (doc.exists) {
-    await reqRef.update({ status: newStatus });
+  await reqRef.update({ status: newStatus });
 
-    // Auto-download calendar invite for admin when approving
-    if (newStatus === 'approved') {
-      downloadICS(doc.data());
+  if (newStatus === 'approved') {
+    downloadICS(doc.data());
+  }
+
+  loadApplicationData();
+
+  // Try EmailJS; fall back to opening Zoho compose if it fails or isn't configured
+  if (newStatus === 'approved' || newStatus === 'denied' || newStatus === 'cancelled') {
+    const req = doc.data();
+    const endTimeStr = calculateEndTime(req.slotStart, req.duration || 45);
+    const formattedDate = formatDate(req.slotDate);
+    const formattedTime = `${formatTime(req.slotStart)} - ${formatTime(endTimeStr)}`;
+    const subject = `${req.type} at ${formattedTime} on ${formattedDate}`;
+
+    const sent = await sendEmailNotification(req, newStatus);
+    if (!sent) {
+      // Build the message body and open Zoho compose
+      const teamsLink = state.config.teamsLink || '';
+      const price = getTypePrice(req.type);
+      const stripeLink = state.config.stripeLink || '';
+      const paymentLine = (newStatus === 'approved' && price)
+        ? `\n\nPayment: £${price} is due for this session.${stripeLink ? '\nPay here: ' + stripeLink : ''}`
+        : '';
+      let body = '';
+      if (newStatus === 'approved') {
+        body = `Hi ${req.name},\n\nYour booking for a ${req.type} at ${formattedTime} on ${formattedDate} is confirmed.\n\nPlease join here: ${teamsLink}${paymentLine}\n\nLooking forward to speaking with you.\n\nBest regards,\nEmily Bremner`;
+      } else if (newStatus === 'denied') {
+        body = `Hi ${req.name},\n\nYour booking request for ${req.type} on ${formattedDate} has been declined.\n\nBest regards,\nEmily Bremner`;
+      } else if (newStatus === 'cancelled') {
+        body = `Hi ${req.name},\n\nApologies, I have had to cancel your ${req.type} on ${formattedDate}.\n\nPlease feel free to rearrange.\n\nBest regards,\nEmily Bremner`;
+      }
+      openComposeFallback(req.email, subject, body);
+      showFlash('EmailJS not set up — Zoho opened for you');
+    } else {
+      showFlash(newStatus === 'approved' ? 'Approved — confirmation sent ✓' : 'Email sent ✓');
     }
-
-    loadApplicationData();
-    sendEmailNotification(doc.data(), newStatus).catch(err => console.error("Email failed:", err));
   }
 }
 
 async function submitRequest() {
+  // Show spinner immediately — don't wait for Firebase
+  state.isSubmitting = true;
+  render();
+
   const form = state.studentForm;
   const slot = state.slots.find(s => s.id === form.slotId);
   const newRequest = {
@@ -342,9 +385,13 @@ async function submitRequest() {
   await db.collection('slots').doc(form.slotId).delete();
   state.slots = state.slots.filter(s => s.id !== form.slotId);
 
-  sendEmailNotification(newRequest, 'admin_alert').catch(err => console.error("Admin alert failed:", err));
-
+  // Show success immediately — don't wait for the email or the full reload
+  state.isSubmitting = false;
   state.hasSubmitted = true;
+  render();
+
+  // Fire email and data reload in the background
+  sendEmailNotification(newRequest, 'admin_alert').catch(err => console.error("Admin alert failed:", err));
   loadApplicationData();
 }
 
@@ -485,6 +532,13 @@ function render() {
 }
 
 function renderStudentView() {
+  if (state.isSubmitting) {
+    return `<div class="card" style="text-align:center;padding:56px 28px;">
+      <div class="spinner" style="margin:0 auto 16px;"></div>
+      <p style="color:var(--text-soft);">Submitting your booking...</p>
+    </div>`;
+  }
+
   if (state.hasSubmitted) {
     const submittedType = state.studentForm.type;
     const price = getTypePrice(submittedType);
