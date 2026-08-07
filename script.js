@@ -731,7 +731,11 @@ function renderAdminView() {
             ${req.status === 'approved' ? `
               <button class="btn btn-ghost" onclick="downloadICS(state.requests.find(r=>r.id==='${req.id}'))">📅 Calendar Invite</button>
               ${price ? `<button class="btn btn-purple" onclick="showInvoice(state.requests.find(r=>r.id==='${req.id}'))">📄 Invoice</button>` : ''}
+              <button class="btn btn-ghost" onclick="sendEmailNotification(state.requests.find(r=>r.id==='${req.id}'),'approved').then(()=>showFlash('Email resent!'))">📧 Resend Email</button>
               <button class="btn btn-ghost" style="color:orange;" onclick="handleCancel('${req.id}')">Cancel</button>
+            ` : ''}
+            ${req.status === 'denied' ? `
+              <button class="btn btn-ghost" onclick="sendEmailNotification(state.requests.find(r=>r.id==='${req.id}'),'denied').then(()=>showFlash('Email resent!'))">📧 Resend Email</button>
             ` : ''}
           </div>
         </div>`;
