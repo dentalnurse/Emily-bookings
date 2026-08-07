@@ -804,9 +804,7 @@ function checkAdminPin() {
   }
 }
 
-// Persistent tap counter lives outside setupEventListeners so render() calls don't reset it
-let _tapCount = 0;
-let _tapTimer = null;
+let _longPressTimer = null;
 
 function setupEventListeners() {
   const logo = document.getElementById('logo-trigger');
@@ -819,18 +817,13 @@ function setupEventListeners() {
       if (e.detail === 3) showAdminPinOverlay();
     });
 
-    // Mobile/tablet: triple-tap
-    freshLogo.addEventListener('touchend', (e) => {
+    // Mobile/tablet: long-press (hold ~600ms)
+    freshLogo.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      _tapCount++;
-      clearTimeout(_tapTimer);
-      if (_tapCount >= 3) {
-        _tapCount = 0;
-        showAdminPinOverlay();
-      } else {
-        _tapTimer = setTimeout(() => { _tapCount = 0; }, 600);
-      }
-    });
+      _longPressTimer = setTimeout(() => { _longPressTimer = null; showAdminPinOverlay(); }, 600);
+    }, { passive: false });
+    freshLogo.addEventListener('touchend', () => { clearTimeout(_longPressTimer); _longPressTimer = null; });
+    freshLogo.addEventListener('touchmove', () => { clearTimeout(_longPressTimer); _longPressTimer = null; });
   }
 }
 
