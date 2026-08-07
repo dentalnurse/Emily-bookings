@@ -242,7 +242,7 @@ async function sendEmailNotification(requestData, status, reason = "") {
       state.config.emailjsServiceId,
       state.config.emailjsTemplateId,
       templateParams,
-      { publicKey: state.config.emailjsPublicKey }
+      state.config.emailjsPublicKey
     );
     return true;
   } catch (error) {
@@ -791,7 +791,11 @@ function renderAdminView() {
             ${req.status === 'approved' ? `
               <button class="btn btn-ghost" onclick="downloadICS(state.requests.find(r=>r.id==='${req.id}'))">📅 Calendar Invite</button>
               ${price ? `<button class="btn btn-purple" onclick="showInvoice(state.requests.find(r=>r.id==='${req.id}'))">📄 Invoice</button>` : ''}
+              <button class="btn btn-ghost" onclick="sendEmailNotification(state.requests.find(r=>r.id==='${req.id}'),'approved').then(()=>showFlash('Email resent!'))">📧 Resend Email</button>
               <button class="btn btn-ghost" style="color:orange;" onclick="handleCancel('${req.id}')">Cancel</button>
+            ` : ''}
+            ${req.status === 'denied' ? `
+              <button class="btn btn-ghost" onclick="sendEmailNotification(state.requests.find(r=>r.id==='${req.id}'),'denied').then(()=>showFlash('Email resent!'))">📧 Resend Email</button>
             ` : ''}
           </div>
         </div>`;
@@ -873,9 +877,7 @@ function checkAdminPin() {
   }
 }
 
-// Persistent tap counter lives outside setupEventListeners so render() calls don't reset it
-let _tapCount = 0;
-let _tapTimer = null;
+let _longPressTimer = null;
 
 function setupEventListeners() {
   const logo = document.getElementById('logo-trigger');
@@ -888,18 +890,13 @@ function setupEventListeners() {
       if (e.detail === 3) showAdminPinOverlay();
     });
 
-    // Mobile/tablet: triple-tap
-    freshLogo.addEventListener('touchend', (e) => {
+    // Mobile/tablet: long-press (hold ~600ms)
+    freshLogo.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      _tapCount++;
-      clearTimeout(_tapTimer);
-      if (_tapCount >= 3) {
-        _tapCount = 0;
-        showAdminPinOverlay();
-      } else {
-        _tapTimer = setTimeout(() => { _tapCount = 0; }, 600);
-      }
-    });
+      _longPressTimer = setTimeout(() => { _longPressTimer = null; showAdminPinOverlay(); }, 600);
+    }, { passive: false });
+    freshLogo.addEventListener('touchend', () => { clearTimeout(_longPressTimer); _longPressTimer = null; });
+    freshLogo.addEventListener('touchmove', () => { clearTimeout(_longPressTimer); _longPressTimer = null; });
   }
 }
 

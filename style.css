@@ -63,6 +63,7 @@ background: var(--accent); color: white;
 font-family: var(--font-display); font-size: 24px; font-weight: 700;
 margin-bottom: 20px; cursor: default; user-select: none;
 box-shadow: 0 4px 20px var(--accent-glow); transition: transform 0.2s;
+touch-action: manipulation;
 }
 .logo:hover { transform: scale(1.05); }
 
