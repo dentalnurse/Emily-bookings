@@ -768,10 +768,29 @@ function setupEventListeners() {
   const logo = document.getElementById('logo-trigger');
   if (logo) {
     logo.replaceWith(logo.cloneNode(true));
-    document.getElementById('logo-trigger').addEventListener('click', (e) => {
+    const freshLogo = document.getElementById('logo-trigger');
+
+    // Desktop: triple-click
+    freshLogo.addEventListener('click', (e) => {
       if (e.detail === 3) {
         const pin = prompt("Admin PIN:");
         if (pin === state.config.adminPin) { state.adminUnlocked = true; state.view = 'admin'; render(); }
+      }
+    });
+
+    // Mobile/tablet: triple-tap (touch events don't set e.detail reliably on iOS)
+    let tapCount = 0;
+    let tapTimer = null;
+    freshLogo.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      tapCount++;
+      clearTimeout(tapTimer);
+      if (tapCount >= 3) {
+        tapCount = 0;
+        const pin = prompt("Admin PIN:");
+        if (pin === state.config.adminPin) { state.adminUnlocked = true; state.view = 'admin'; render(); }
+      } else {
+        tapTimer = setTimeout(() => { tapCount = 0; }, 600);
       }
     });
   }
