@@ -242,7 +242,7 @@ async function sendEmailNotification(requestData, status, reason = "") {
       state.config.emailjsServiceId,
       state.config.emailjsTemplateId,
       templateParams,
-      state.config.emailjsPublicKey
+      { publicKey: state.config.emailjsPublicKey }
     );
     return true;
   } catch (error) {
@@ -833,14 +833,71 @@ function getCutoffDate() {
 function escapeHtml(s) { if (!s) return ""; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function showFlash(m) { state.flashMessage = m; render(); setTimeout(() => { state.flashMessage = null; render(); }, 3000); }
 
+function showAdminPinOverlay() {
+  const existing = document.getElementById('admin-pin-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'admin-pin-overlay';
+  overlay.innerHTML = `
+    <div class="pin-modal">
+      <h3>Admin Access</h3>
+      <input type="password" id="admin-pin-input" placeholder="Enter PIN" autocomplete="current-password">
+      <div class="pin-modal-buttons">
+        <button class="btn btn-ghost" onclick="document.getElementById('admin-pin-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="checkAdminPin()">Unlock</button>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  setTimeout(() => {
+    const inp = document.getElementById('admin-pin-input');
+    if (inp) { inp.focus(); inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') checkAdminPin(); }); }
+  }, 50);
+}
+
+function checkAdminPin() {
+  const input = document.getElementById('admin-pin-input');
+  if (!input) return;
+  if (input.value === state.config.adminPin) {
+    document.getElementById('admin-pin-overlay').remove();
+    state.adminUnlocked = true;
+    state.view = 'admin';
+    render();
+  } else {
+    input.value = '';
+    input.placeholder = 'Incorrect PIN — try again';
+    input.style.borderColor = 'var(--red)';
+    input.focus();
+  }
+}
+
+// Persistent tap counter lives outside setupEventListeners so render() calls don't reset it
+let _tapCount = 0;
+let _tapTimer = null;
+
 function setupEventListeners() {
   const logo = document.getElementById('logo-trigger');
   if (logo) {
     logo.replaceWith(logo.cloneNode(true));
-    document.getElementById('logo-trigger').addEventListener('click', (e) => {
-      if (e.detail === 3) {
-        const pin = prompt("Admin PIN:");
-        if (pin === state.config.adminPin) { state.adminUnlocked = true; state.view = 'admin'; render(); }
+    const freshLogo = document.getElementById('logo-trigger');
+
+    // Desktop: triple-click
+    freshLogo.addEventListener('click', (e) => {
+      if (e.detail === 3) showAdminPinOverlay();
+    });
+
+    // Mobile/tablet: triple-tap
+    freshLogo.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      _tapCount++;
+      clearTimeout(_tapTimer);
+      if (_tapCount >= 3) {
+        _tapCount = 0;
+        showAdminPinOverlay();
+      } else {
+        _tapTimer = setTimeout(() => { _tapCount = 0; }, 600);
       }
     });
   }

@@ -189,6 +189,18 @@ border-radius: var(--radius-sm); font-size: 14px; font-weight: 600;
 z-index: 999; animation: fadeUp 0.3s ease both; box-shadow: var(--shadow-lg);
 }
 
+#admin-pin-overlay {
+position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.pin-modal {
+background: var(--card); border-radius: var(--radius); padding: 28px;
+width: 100%; max-width: 320px; box-shadow: var(--shadow-lg);
+}
+.pin-modal h3 { font-family: var(--font-display); font-size: 20px; margin-bottom: 16px; color: var(--text); }
+.pin-modal input { margin-bottom: 16px; }
+.pin-modal-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+
 .chips-wrap { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
 .btn-row { display: flex; gap: 10px; }
 .personal-zoom { margin-top: 16px; }
