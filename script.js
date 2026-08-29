@@ -23,6 +23,8 @@ let state = {
   adminTab: 'requests',
   isLoaded: false,
   flashMessage: null,
+  manageRequestId: null,
+  manageRequest: null,
   config: {
     name: '', email: '', title: 'Book a Consultation', teamsLink: '', adminPin: '123456789',
     meetingTypes: [], emailjsServiceId: '', emailjsTemplateId: '', emailjsPublicKey: '',
@@ -212,12 +214,24 @@ async function sendEmailNotification(requestData, status, reason = "") {
     ? `\n\nPayment: £${price} is due for this session.${stripeLink ? '\nPay here: ' + stripeLink : '\nPlease arrange payment with your tutor.'}`
     : '';
 
+  const bookingUrl = getBaseUrl();
+  const manageLink = requestData.id ? `${bookingUrl}?manage=${requestData.id}` : '';
+
   if (status === 'approved') {
-    statusMessage = `Hi ${name},\nYour booking for a ${type} at ${formattedTime} on ${formattedDate} is confirmed.\nPlease join here: ${teamsLink}${paymentLine}\nLooking forward to speaking with you.\nBest regards,\nEmily Bremner`;
+    const cancelLine = manageLink ? `\n\nNeed to cancel? You can do so here: ${manageLink}` : '';
+    statusMessage = `Hi ${name},\nYour booking for a ${type} at ${formattedTime} on ${formattedDate} is confirmed.\nPlease join here: ${teamsLink}${paymentLine}${cancelLine}\nLooking forward to speaking with you.\nBest regards,\nEmily Bremner`;
   } else if (status === 'denied') {
     statusMessage = `Hi ${name},\nYour booking request for ${type} on ${formattedDate} has been declined.\nBest regards,\nEmily Bremner`;
   } else if (status === 'cancelled') {
-    statusMessage = `Hi ${name},\nApologies, I have had to cancel your ${type} on ${formattedDate}.\nReason: ${reason}.\nPlease feel free to rearrange.\nBest regards,\nEmily Bremner`;
+    statusMessage = `Hi ${name},\nApologies, I have had to cancel your ${type} on ${formattedDate}.\nReason: ${reason}.\nPlease feel free to rearrange: ${bookingUrl}\nBest regards,\nEmily Bremner`;
+  } else if (status === 'cancelled_reschedule') {
+    const note = reason && reason.trim() ? `\n${reason}` : '';
+    statusMessage = `Hi ${name},\nNo problem — I've cancelled your ${type} on ${formattedDate} so you can pick a date that works better for you.${note}\nYou can choose a new time here: ${bookingUrl}\nBest regards,\nEmily Bremner`;
+  } else if (status === 'cancelled_by_student') {
+    targetEmail = state.config.email;
+    targetName = state.config.name;
+    const note = reason && reason.trim() ? `\nNote from student: ${reason}` : '';
+    statusMessage = `${name} (${email}) has cancelled their ${type} booked for ${formattedTime} on ${formattedDate}.${note}`;
   } else if (status === 'admin_alert') {
     targetEmail = state.config.email;
     targetName = state.config.name;
@@ -251,6 +265,10 @@ async function sendEmailNotification(requestData, status, reason = "") {
   }
 }
 
+function getBaseUrl() {
+  return window.location.origin + window.location.pathname;
+}
+
 // Opens Zoho compose as a fallback when EmailJS fails or isn't configured
 function openComposeFallback(to, subject, body) {
   const u = 'https://mail.zoho.com/zm/#/compose?to=' + encodeURIComponent(to)
@@ -278,6 +296,11 @@ async function loadApplicationData() {
 
     const reqSnap = await db.collection('requests').orderBy('submittedAt', 'desc').get();
     state.requests = reqSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    if (state.view === 'manage') {
+      state.manageRequest = state.requests.find(r => r.id === state.manageRequestId) || null;
+    }
+
     state.isLoaded = true;
     render();
   } catch (error) { state.isLoaded = true; render(); }
@@ -333,7 +356,7 @@ async function updateRequestStatus(requestId, newStatus) {
 
   // Try EmailJS; fall back to opening Zoho compose if it fails or isn't configured
   if (newStatus === 'approved' || newStatus === 'denied' || newStatus === 'cancelled') {
-    const req = doc.data();
+    const req = { ...doc.data(), id: requestId };
     const endTimeStr = calculateEndTime(req.slotStart, req.duration || 45);
     const formattedDate = formatDate(req.slotDate);
     const formattedTime = `${formatTime(req.slotStart)} - ${formatTime(endTimeStr)}`;
@@ -348,9 +371,10 @@ async function updateRequestStatus(requestId, newStatus) {
       const paymentLine = (newStatus === 'approved' && price)
         ? `\n\nPayment: £${price} is due for this session.${stripeLink ? '\nPay here: ' + stripeLink : ''}`
         : '';
+      const manageLink = `${getBaseUrl()}?manage=${req.id}`;
       let body = '';
       if (newStatus === 'approved') {
-        body = `Hi ${req.name},\n\nYour booking for a ${req.type} at ${formattedTime} on ${formattedDate} is confirmed.\n\nPlease join here: ${teamsLink}${paymentLine}\n\nLooking forward to speaking with you.\n\nBest regards,\nEmily Bremner`;
+        body = `Hi ${req.name},\n\nYour booking for a ${req.type} at ${formattedTime} on ${formattedDate} is confirmed.\n\nPlease join here: ${teamsLink}${paymentLine}\n\nNeed to cancel? You can do so here: ${manageLink}\n\nLooking forward to speaking with you.\n\nBest regards,\nEmily Bremner`;
       } else if (newStatus === 'denied') {
         body = `Hi ${req.name},\n\nYour booking request for ${req.type} on ${formattedDate} has been declined.\n\nBest regards,\nEmily Bremner`;
       } else if (newStatus === 'cancelled') {
@@ -395,18 +419,63 @@ async function submitRequest() {
   loadApplicationData();
 }
 
-async function handleCancel(requestId) {
-  const reason = prompt("Enter reason for cancellation:");
+// Asks Emily whether she's cancelling, or the student asked to change date —
+// the two cases send different emails (apology vs. reschedule invite).
+function showCancelModal(requestId) {
+  const existing = document.getElementById('cancel-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cancel-overlay';
+  overlay.innerHTML = `
+    <div class="pin-modal">
+      <h3>Cancel Booking</h3>
+      <p style="color:var(--text-soft);font-size:14px;margin-bottom:18px;line-height:1.5;">What's the reason for this cancellation?</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button class="btn btn-danger btn-full" onclick="promptCancelReason('${requestId}','cancelled')">I need to cancel this session</button>
+        <button class="btn btn-primary btn-full" onclick="promptCancelReason('${requestId}','cancelled_reschedule')">Student requested a different date</button>
+      </div>
+      <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="document.getElementById('cancel-overlay').remove()">Never mind</button>
+    </div>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+function promptCancelReason(requestId, cancelType) {
+  document.getElementById('cancel-overlay')?.remove();
+  const label = cancelType === 'cancelled_reschedule'
+    ? "Add a short note for the student (optional):"
+    : "Enter reason for cancellation:";
+  const reason = prompt(label);
   if (reason === null) return;
+  handleCancel(requestId, cancelType, reason);
+}
+
+async function handleCancel(requestId, cancelType, reason) {
+  const reqRef = db.collection('requests').doc(requestId);
+  const doc = await reqRef.get();
+  if (!doc.exists) return;
+
+  await reqRef.update({ status: cancelType });
+  loadApplicationData();
+  sendEmailNotification(doc.data(), cancelType, reason).catch(err => console.error("Email failed:", err));
+  showFlash(cancelType === 'cancelled_reschedule' ? 'Cancelled — reschedule link sent ✓' : 'Cancelled — email sent ✓');
+}
+
+// Student self-cancel via the link included in their confirmation email
+async function studentCancelBooking(requestId) {
+  if (!confirm("Are you sure you want to cancel this booking?")) return;
 
   const reqRef = db.collection('requests').doc(requestId);
   const doc = await reqRef.get();
+  if (!doc.exists) return;
 
-  if (doc.exists) {
-    await reqRef.update({ status: 'cancelled' });
-    loadApplicationData();
-    sendEmailNotification(doc.data(), 'cancelled', reason).catch(err => console.error("Email failed:", err));
-  }
+  await reqRef.update({ status: 'cancelled_by_student' });
+  sendEmailNotification(doc.data(), 'cancelled_by_student').catch(err => console.error("Email failed:", err));
+
+  state.manageRequest = { ...state.manageRequest, status: 'cancelled_by_student' };
+  render();
 }
 
 // Silent delete — no email sent, available on all requests
@@ -526,7 +595,9 @@ function render() {
       </div>`;
   }
 
-  html += (state.view === 'admin') ? renderAdminView() : renderStudentView();
+  html += (state.view === 'admin') ? renderAdminView()
+    : (state.view === 'manage') ? renderManageView()
+    : renderStudentView();
   app.innerHTML = html;
   setupEventListeners();
 }
@@ -618,6 +689,47 @@ function renderStudentView() {
       onclick="submitRequest()">
       Book Now
     </button>
+  </div>`;
+}
+
+function renderManageView() {
+  const req = state.manageRequest;
+
+  if (!req) {
+    return `<div class="card" style="text-align:center;padding:56px 28px;">
+      <h2 style="font-family:var(--font-display);font-size:22px;">Booking Not Found</h2>
+      <p style="color:var(--text-soft);margin-top:8px;">This link may have expired, or the booking has already been dealt with.</p>
+      <button class="btn btn-ghost" style="margin-top:20px" onclick="location.href=location.pathname">Back to Booking Page</button>
+    </div>`;
+  }
+
+  if (req.status === 'cancelled_by_student') {
+    return `<div class="card success-card">
+      <div class="success-icon">✓</div>
+      <h2>Booking Cancelled</h2>
+      <p>Your ${escapeHtml(req.type)} on ${formatDate(req.slotDate)} has been cancelled. ${escapeHtml(state.config.name || 'Your tutor')} has been notified.</p>
+      <button class="btn btn-primary" style="margin-top:20px" onclick="location.href=location.pathname">Book a New Time</button>
+    </div>`;
+  }
+
+  if (req.status !== 'pending' && req.status !== 'approved') {
+    return `<div class="card" style="text-align:center;padding:56px 28px;">
+      <h2 style="font-family:var(--font-display);font-size:22px;">This Booking Can't Be Cancelled Here</h2>
+      <p style="color:var(--text-soft);margin-top:8px;">Please contact ${escapeHtml(state.config.name || 'your tutor')} directly if you need help with it.</p>
+    </div>`;
+  }
+
+  const endTime = calculateEndTime(req.slotStart, req.duration || 45);
+  return `<div class="card">
+    <h2 style="font-family:var(--font-display);font-size:22px;margin-bottom:16px;">Manage Your Booking</h2>
+    <div style="font-size:14px;color:#444;line-height:1.9;margin-bottom:20px;">
+      <strong>Type:</strong> ${escapeHtml(req.type)}<br>
+      <strong>Date:</strong> ${formatDate(req.slotDate)}<br>
+      <strong>Time:</strong> ${formatTime(req.slotStart)} &ndash; ${formatTime(endTime)}<br>
+      <strong>Status:</strong> ${req.status === 'approved' ? 'Confirmed' : 'Pending approval'}
+    </div>
+    <p style="color:var(--text-soft);font-size:14px;margin-bottom:20px;">Need to cancel, or want a different date? Cancel below, then head back to the booking page to pick a new time.</p>
+    <button class="btn btn-danger btn-full" onclick="studentCancelBooking('${req.id}')">Cancel This Booking</button>
   </div>`;
 }
 
@@ -741,12 +853,16 @@ function renderAdminView() {
         const statusLabel = req.status === 'pending' ? '⏳ PENDING'
           : req.status === 'approved' ? '✓ APPROVED'
           : req.status === 'cancelled' ? '✕ CANCELLED'
+          : req.status === 'cancelled_reschedule' ? '🔄 RESCHEDULE REQUESTED'
+          : req.status === 'cancelled_by_student' ? '✕ CANCELLED BY STUDENT'
           : req.status.toUpperCase();
         const statusColor = req.status === 'pending' ? '#ef6c00'
           : req.status === 'approved' ? 'var(--green)'
+          : req.status === 'cancelled_reschedule' ? 'var(--purple)'
           : 'var(--red)';
         const statusBg = req.status === 'pending' ? '#fff3e0'
           : req.status === 'approved' ? 'var(--green-soft)'
+          : req.status === 'cancelled_reschedule' ? 'var(--purple-soft)'
           : 'var(--red-soft)';
 
         return `
@@ -792,7 +908,7 @@ function renderAdminView() {
               <button class="btn btn-ghost" onclick="downloadICS(state.requests.find(r=>r.id==='${req.id}'))">📅 Calendar Invite</button>
               ${price ? `<button class="btn btn-purple" onclick="showInvoice(state.requests.find(r=>r.id==='${req.id}'))">📄 Invoice</button>` : ''}
               <button class="btn btn-ghost" onclick="sendEmailNotification(state.requests.find(r=>r.id==='${req.id}'),'approved').then(()=>showFlash('Email resent!'))">📧 Resend Email</button>
-              <button class="btn btn-ghost" style="color:orange;" onclick="handleCancel('${req.id}')">Cancel</button>
+              <button class="btn btn-ghost" style="color:orange;" onclick="showCancelModal('${req.id}')">Cancel</button>
             ` : ''}
             ${req.status === 'denied' ? `
               <button class="btn btn-ghost" onclick="sendEmailNotification(state.requests.find(r=>r.id==='${req.id}'),'denied').then(()=>showFlash('Email resent!'))">📧 Resend Email</button>
@@ -898,6 +1014,14 @@ function setupEventListeners() {
     freshLogo.addEventListener('touchend', () => { clearTimeout(_longPressTimer); _longPressTimer = null; });
     freshLogo.addEventListener('touchmove', () => { clearTimeout(_longPressTimer); _longPressTimer = null; });
   }
+}
+
+// A booking's confirmation email links here as ?manage=<requestId> so students
+// can cancel without needing an account or the admin PIN.
+const manageId = new URLSearchParams(window.location.search).get('manage');
+if (manageId) {
+  state.view = 'manage';
+  state.manageRequestId = manageId;
 }
 
 loadApplicationData();
