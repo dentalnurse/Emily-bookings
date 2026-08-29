@@ -226,7 +226,7 @@ async function sendEmailNotification(requestData, status, reason = "") {
     statusMessage = `Hi ${name},\nApologies, I have had to cancel your ${type} on ${formattedDate}.\nReason: ${reason}.\nPlease feel free to rearrange: ${bookingUrl}\nBest regards,\nEmily Bremner`;
   } else if (status === 'cancelled_reschedule') {
     const note = reason && reason.trim() ? `\n${reason}` : '';
-    statusMessage = `Hi ${name},\nNo problem — I've cancelled your ${type} on ${formattedDate} so you can pick a date that works better for you.${note}\nYou can choose a new time here: ${bookingUrl}\nBest regards,\nEmily Bremner`;
+    statusMessage = `Hi ${name},\nYour ${type} on ${formattedDate} has been cancelled so you can pick a date that works better for you.${note}\n\nYou can choose a new time here: ${bookingUrl}\n\nIf you've already rescheduled, please disregard this message.\n\nBest regards,\nEmily Bremner`;
   } else if (status === 'cancelled_by_student') {
     targetEmail = state.config.email;
     targetName = state.config.name;
